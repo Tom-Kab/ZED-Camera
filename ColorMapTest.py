@@ -1,86 +1,54 @@
 import pyzed.sl as sl
-import cv2
 import numpy as np
+import cv2
 
 def main():
-    # Create a ZED camera object
     zed = sl.Camera()
 
-    # Create initialization parameters
     init_params = sl.InitParameters()
-    init_params.depth_mode = sl.DEPTH_MODE.PERFORMANCE  # Or QUALITY, ULTRA
+    init_params.depth_mode = sl.DEPTH_MODE.QUALITY
     init_params.coordinate_units = sl.UNIT.MILLIMETER
+    init_params.depth_minimum_distance = 300  # Minimum distance in mm
+    init_params.depth_maximum_distance = 5000  # Maximum distance in mm
 
-    # Open the camera
-    err = zed.open(init_params)
-    if err != sl.ERROR_CODE.SUCCESS:
-        print("Error {}: {}".format(err, sl.error_code_to_string(err)))
-        exit()
+    if zed.open(init_params) != sl.ERROR_CODE.SUCCESS:
+        print("Failed to open ZED Camera.")
+        return
 
-    previous_depth_maps = []
-    FILTER_LENGTH = 5
-    confidence_threshold = 50
-    kernel_size = 3
-    global_min_depth = None
-    global_max_depth = None
+    depth = sl.Mat()
+    temp_depth = None  # For temporal smoothing
+    alpha = 0.8  # Smoothing factor
 
-    while True:
-        if zed.grab() == sl.ERROR_CODE.SUCCESS:
-            depth_map = sl.Mat()
-            confidence_map = sl.Mat()
+    print("Press 'q' to exit.")
 
-            zed.retrieve_measure(depth_map, sl.MEASURE.DEPTH)
-            zed.retrieve_measure(confidence_map, sl.MEASURE.CONFIDENCE)
+    try:
+        while True:
+            if zed.grab() == sl.ERROR_CODE.SUCCESS:
+                zed.retrieve_measure(depth, sl.MEASURE.DEPTH)
+                depth_data = depth.get_data()
 
-            depth_array = depth_map.get_data()
-            confidence_array = confidence_map.get_data()
+                # Handle invalid depth values (replace them with a specific value, e.g., 0)
+                invalid_mask = np.isnan(depth_data) | (depth_data <= 0) | (depth_data > init_params.depth_maximum_distance)
+                depth_data[invalid_mask] = 0
 
-            # Handle invalid values (Inf and NaN)
-            depth_array[np.isinf(depth_array)] = 0
-            depth_array[np.isnan(depth_array)] = 0
-
-            # Confidence Thresholding
-            depth_array[confidence_array < confidence_threshold] = 0
-
-            # Temporal Filtering
-            previous_depth_maps.append(depth_array.copy())
-            if len(previous_depth_maps) > FILTER_LENGTH:
-                previous_depth_maps.pop(0)
-
-            if previous_depth_maps:
-                filtered_depth = np.mean(np.stack(previous_depth_maps), axis=0)
-
-                # Spatial Filtering (Median Blur)
-                filtered_depth = cv2.medianBlur(filtered_depth.astype(np.float32), kernel_size).astype(np.float32)
-
-                # Robust Scaling with Global Min/Max
-                valid_depths = filtered_depth[filtered_depth > 0]
-                if valid_depths.size > 0:
-                    local_min_depth = np.percentile(valid_depths, 5)
-                    local_max_depth = np.percentile(valid_depths, 95)
-
-                    if global_min_depth is None:
-                        global_min_depth = local_min_depth
-                        global_max_depth = local_max_depth
-                    else:
-                        alpha = 0.1  # Smoothing factor
-                        global_min_depth = alpha * local_min_depth + (1 - alpha) * global_min_depth
-                        global_max_depth = alpha * local_max_depth + (1 - alpha) * global_max_depth
-
-                    if global_max_depth - global_min_depth > 0:
-                        gray_depth = (255 * (filtered_depth - global_min_depth) / (global_max_depth - global_min_depth)).astype(np.uint8)
-                        gray_depth = np.clip(gray_depth, 0, 255)
-                    else:
-                        gray_depth = np.zeros(filtered_depth.shape, dtype=np.uint8)
+                # Temporal smoothing
+                if temp_depth is None:
+                    temp_depth = depth_data.copy()
                 else:
-                    gray_depth = np.zeros(filtered_depth.shape, dtype=np.uint8)
+                    temp_depth = cv2.addWeighted(temp_depth, alpha, depth_data, 1 - alpha, 0)
 
-                cv2.imshow("Depth Map (Grayscale)", gray_depth)
+                # Normalize and visualize
+                depth_normalized = cv2.normalize(temp_depth, None, 0, 255, cv2.NORM_MINMAX)
+                depth_colored = cv2.applyColorMap(depth_normalized.astype(np.uint8), cv2.COLORMAP_JET)
 
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
+                # Display the depth image
+                cv2.imshow("Depth Map", depth_colored)
 
-    zed.close()
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    break
+    finally:
+        zed.close()
+        cv2.destroyAllWindows()
 
 if __name__ == "__main__":
     main()

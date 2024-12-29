@@ -1,0 +1,38 @@
+# Ignore build files
+/build/
+/bin/
+/obj/
+
+# Ignore dependency directories
+/node_modules/
+/packages/
+
+# Ignore IDE specific files
+/.idea/
+/.vscode/
+/*.suo
+/*.user
+/*.userosscache
+/*.sln.docstates
+
+# Ignore OS generated files
+.DS_Store
+Thumbs.db
+
+# Ignore log files
+*.log
+
+# Ignore Python virtual environment
+/venv/
+/__pycache__/
+
+# Ignore compiled files
+*.class
+*.dll
+*.exe
+*.o
+*.so
+
+# Ignore ZED Camera specific files
+*.zed
+*.svo
