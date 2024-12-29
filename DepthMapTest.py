@@ -3,48 +3,50 @@ import numpy as np
 import cv2
 
 def main():
-    # Create a ZED Camera object
     zed = sl.Camera()
 
-    # Set up the ZED Camera configuration
     init_params = sl.InitParameters()
-    init_params.depth_mode = sl.DEPTH_MODE.ULTRA  # Use ULTRA depth mode for high precision
-    init_params.coordinate_units = sl.UNIT.MILLIMETER  # Use millimeter as the unit for depth measurements
+    init_params.depth_mode = sl.DEPTH_MODE.QUALITY
+    init_params.coordinate_units = sl.UNIT.MILLIMETER
+    init_params.depth_minimum_distance = 300  # Minimum distance in mm
+    init_params.depth_maximum_distance = 5000  # Maximum distance in mm
 
-    # Open the camera
     if zed.open(init_params) != sl.ERROR_CODE.SUCCESS:
-        print("Failed to open the ZED Camera.")
+        print("Failed to open ZED Camera.")
         return
 
-    # Create Mat objects to store images
-    image = sl.Mat()
     depth = sl.Mat()
+    temp_depth = None  # For temporal smoothing
+    alpha = 0.8  # Smoothing factor
 
     print("Press 'q' to exit.")
 
     try:
         while True:
-            # Capture images and retrieve the depth map
             if zed.grab() == sl.ERROR_CODE.SUCCESS:
-                zed.retrieve_image(image, sl.VIEW.LEFT)  # Retrieve the left image
-                zed.retrieve_measure(depth, sl.MEASURE.DEPTH)  # Retrieve the depth map
-
-                # Convert the depth map to a numpy array
+                zed.retrieve_measure(depth, sl.MEASURE.DEPTH)
                 depth_data = depth.get_data()
-                
-                # Normalize the depth data for visualization
-                depth_data_normalized = cv2.normalize(depth_data, None, 0, 255, cv2.NORM_MINMAX)
-                depth_data_colored = cv2.applyColorMap(depth_data_normalized.astype(np.uint8), cv2.COLORMAP_JET)
 
-                # Display the images
-                cv2.imshow("Image", image.get_data())
-                cv2.imshow("Depth Map", depth_data_colored)
+                # Handle invalid depth values (replace them with a specific value, e.g., 0)
+                invalid_mask = np.isnan(depth_data) | (depth_data <= 0) | (depth_data > init_params.depth_maximum_distance)
+                depth_data[invalid_mask] = 0
 
-                # Exit the loop when 'q' is pressed
+                # Temporal smoothing
+                if temp_depth is None:
+                    temp_depth = depth_data.copy()
+                else:
+                    temp_depth = cv2.addWeighted(temp_depth, alpha, depth_data, 1 - alpha, 0)
+
+                # Normalize and visualize
+                depth_normalized = cv2.normalize(temp_depth, None, 0, 255, cv2.NORM_MINMAX)
+                depth_colored = cv2.applyColorMap(depth_normalized.astype(np.uint8), cv2.COLORMAP_JET)
+
+                # Display the depth image
+                cv2.imshow("Depth Map", depth_colored)
+
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     break
     finally:
-        # Release resources
         zed.close()
         cv2.destroyAllWindows()
 
